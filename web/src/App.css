@@ -1,0 +1,47 @@
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+.app-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1rem;
+  background-color: #1e1e1e;
+  border-bottom: 1px solid #333;
+}
+
+.file-controls {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+}
+
+.new-file-btn {
+  padding: 0.5rem 1rem;
+  background-color: #0098da;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.new-file-btn:hover {
+  background-color: #0082b9;
+}
+
+.file-select {
+  padding: 0.5rem;
+  min-width: 200px;
+  background-color: #2d2d2d;
+  color: white;
+  border: 1px solid #404040;
+  border-radius: 4px;
+}
+
+.app-content {
+  flex: 1;
+  overflow: hidden;
+}
