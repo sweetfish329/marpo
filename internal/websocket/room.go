@@ -9,7 +9,7 @@ import (
 type Room struct {
 	name       string
 	clients    map[*Client]bool
-	broadcast  chan []byte
+	broadcast  chan wsMessage
 	register   chan *Client
 	unregister chan *Client
 	mutex      sync.RWMutex
@@ -19,7 +19,7 @@ func NewRoom(name string) *Room {
 	return &Room{
 		name:       name,
 		clients:    make(map[*Client]bool),
-		broadcast:  make(chan []byte),
+		broadcast:  make(chan wsMessage),
 		register:   make(chan *Client),
 		unregister: make(chan *Client),
 	}
@@ -41,13 +41,12 @@ func (r *Room) Unregister(client *Client) {
 	r.mutex.Unlock()
 }
 
-func (r *Room) Broadcast(message []byte) {
+func (r *Room) Broadcast(msg wsMessage) {
 	r.mutex.RLock()
 	for client := range r.clients {
 		select {
-		case client.send <- message:
+		case client.send <- msg:
 		default:
-			// 送信がブロックされる場合はクライアントを削除
 			close(client.send)
 			delete(r.clients, client)
 		}
@@ -67,12 +66,11 @@ func (r *Room) Run() {
 				close(client.send)
 				log.Printf("Client disconnected from room '%s'. Total clients: %d\n", r.name, len(r.clients))
 			}
-		case message := <-r.broadcast:
+		case msg := <-r.broadcast:
 			for client := range r.clients {
 				select {
-				case client.send <- message:
+				case client.send <- msg:
 				default:
-					// 送信がブロックされる場合はクライアントを削除
 					close(client.send)
 					delete(r.clients, client)
 				}

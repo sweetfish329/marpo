@@ -7,6 +7,7 @@ import (
 	"log"
 	"marpo/internal/filehandlers" // パッケージ名を変更
 	wsinternal "marpo/internal/websocket"
+	"net"
 	"net/http"
 	"os"
 	"path"
@@ -18,6 +19,20 @@ import (
 )
 
 var addr = flag.String("addr", ":8080", "http service address")
+
+// 自身のIPv4アドレスを取得
+func getLocalIPv4() string {
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return "localhost"
+	}
+	for _, addr := range addrs {
+		if ipnet, ok := addr.(*net.IPNet); ok && !ipnet.IP.IsLoopback() && ipnet.IP.To4() != nil {
+			return ipnet.IP.String()
+		}
+	}
+	return "localhost"
+}
 
 // SPAのためのファイルサーバーハンドラー
 func spaFileServer(root string) http.HandlerFunc {
@@ -99,8 +114,15 @@ func main() {
 	}
 
 	// CORSの設定
+	localIP := getLocalIPv4()
+	corsOrigins := []string{
+		"http://localhost:5173",
+		"http://localhost:8080",
+		"http://" + localIP + ":5173",
+		"http://" + localIP + ":8080",
+	}
 	corsMiddleware := ghandlers.CORS( // エイリアスを使用
-		ghandlers.AllowedOrigins([]string{"http://localhost:5173", "http://localhost:8080"}),
+		ghandlers.AllowedOrigins(corsOrigins),
 		ghandlers.AllowedMethods([]string{"GET", "POST", "PUT", "OPTIONS"}),
 		ghandlers.AllowedHeaders([]string{"Content-Type", "X-Requested-With"}),
 	)

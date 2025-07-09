@@ -6,6 +6,7 @@ import { MonacoBinding } from 'y-monaco';
 import { Marp } from '@marp-team/marp-core';
 import debounce from 'lodash.debounce';
 import './EditorComponent.css';
+import { config } from '/config.js';
 
 const EditorComponent = ({ roomName }) => {
   const editorRef = useRef(null);
@@ -56,12 +57,18 @@ const EditorComponent = ({ roomName }) => {
     try {
       const ydoc = new Y.Doc();
       const provider = new WebsocketProvider(
-        'ws://localhost:8080/ws',
-        encodeURIComponent(roomName), // ファイル名をエンコード
+        config.wsUrl,
+        encodeURIComponent(roomName),
         ydoc,
         { connect: true }
       );
       wsProviderRef.current = provider;
+
+      // MonacoモデルのEOLをLFに強制
+      const model = editor.getModel();
+      if (model) {
+        model.setEOL && model.setEOL(1); // 1 = LF
+      }
 
       // 接続状態の監視
       provider.on('status', ({ status }) => {
@@ -73,9 +80,17 @@ const EditorComponent = ({ roomName }) => {
               const response = await fetch(`/api/files/${roomName}`);
               if (response.ok) {
                 const content = await response.text();
+                const normalized = content.replace(/\r\n|\r/g, '\n');
                 const ytext = ydoc.getText('monaco');
                 if (ytext.toString() === '') {
-                  ytext.insert(0, content);
+                  ytext.insert(0, normalized);
+                } else {
+                  // 既存ytextもLFで正規化
+                  const current = ytext.toString().replace(/\r\n|\r/g, '\n');
+                  if (current !== ytext.toString()) {
+                    ytext.delete(0, ytext.length);
+                    ytext.insert(0, current);
+                  }
                 }
                 handleEditorChange(ytext.toString());
               }
@@ -127,7 +142,10 @@ const EditorComponent = ({ roomName }) => {
               wordWrap: 'on',
               fontSize: 16,
               lineNumbers: 'on',
-              automaticLayout: true
+              automaticLayout: true,
+              trimAutoWhitespace: false, // 末尾の空行・空白を自動で削除しない
+              renderFinalNewline: true, // 最終行の改行も表示
+              renderWhitespace: 'all', // 空白も可視化
             }}
           />
         </div>
