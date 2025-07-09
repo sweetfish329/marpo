@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import Editor from '@monaco-editor/react';
 import * as Y from 'yjs';
 import { WebsocketProvider } from 'y-websocket';
@@ -8,152 +8,88 @@ import './EditorComponent.css';
 
 const EditorComponent = ({ roomName }) => {
   const editorRef = useRef(null);
-  const [content, setContent] = useState('');
   const [preview, setPreview] = useState('');
-  const marpRef = useRef(null);
+  const marpRef = useRef(new Marp());
+  const wsProviderRef = useRef(null);
+  const bindingRef = useRef(null);
 
-  // Marpインスタンスの初期化
-  useEffect(() => {
-    marpRef.current = new Marp({
-      markdown: {
-        breaks: true,
-      },
-      html: true,
-      math: true
-    });
-  }, []);
-
-  // ファイルの内容を読み込む関数
-  const loadFileContent = useCallback(async () => {
-    try {
-      const response = await fetch(`http://localhost:8080/api/files/${roomName}`);
-      if (!response.ok) {
-        return `---
-marp: true
-theme: default
----
-
-# ${roomName.replace('.md', '')}
-`;
-      }
-      const content = await response.text();
-      return content;
-    } catch (err) {
-      console.error('Failed to load file:', err);
-      return '';
-    }
-  }, [roomName]);
-
-  // ファイル内容の読み込みと初期レンダリング
-  useEffect(() => {
-    loadFileContent().then(initialContent => {
-      setContent(initialContent);
-      if (marpRef.current) {
-        try {
-          const { html } = marpRef.current.render(initialContent);
-          setPreview(html);
-        } catch (err) {
-          console.error('Initial rendering failed:', err);
-        }
-      }
-    });
-  }, [loadFileContent]);
-
-  // エディタの変更ハンドラーを追加
-  const handleEditorChange = useCallback((value) => {
-    if (!value || !marpRef.current) return;
-    
+  const handleEditorChange = (value) => {
+    if (!value) return;
     try {
       const { html } = marpRef.current.render(value);
-      setContent(value);
       setPreview(html);
     } catch (err) {
       console.error('Preview rendering failed:', err);
     }
-  }, []);
+  };
 
-  // WebSocket接続とエディタのセットアップ
-  useEffect(() => {
-    let yDoc = null;
-    let provider = null;
-    let binding = null;
-
-    const setupEditor = async () => {
-      if (!editorRef.current) return;
-
-      try {
-        const initialContent = await loadFileContent();
-        yDoc = new Y.Doc();
-        provider = new WebsocketProvider(
-          'ws://localhost:8080/ws',
-          roomName,
-          yDoc
-        );
-
-        const ytext = yDoc.getText('monaco');
-        if (ytext.toString() === '') {
-          ytext.insert(0, initialContent);
-        }
-
-        binding = new MonacoBinding(
-          ytext,
-          editorRef.current.getModel(),
-          new Set([editorRef.current]),
-          provider.awareness
-        );
-
-        // テキスト変更の監視を改善
-        ytext.observe(() => {
-          const newContent = ytext.toString();
-          handleEditorChange(newContent); // 変更ハンドラーを使用
-        });
-
-        // 初期コンテンツを設定
-        handleEditorChange(ytext.toString());
-      } catch (err) {
-        console.error('Setup failed:', err);
-      }
-    };
-
-    setupEditor();
-
-    return () => {
-      if (binding) binding.destroy();
-      if (provider) provider.destroy();
-      if (yDoc) yDoc.destroy();
-    };
-  }, [roomName, loadFileContent, handleEditorChange]);
-
-  const handleEditorDidMount = useCallback((editor) => {
+  const handleEditorDidMount = async (editor) => {
     editorRef.current = editor;
+
+    try {
+      const ydoc = new Y.Doc();
+      const provider = new WebsocketProvider(
+        'ws://localhost:8080/ws',
+        roomName,
+        ydoc
+      );
+      wsProviderRef.current = provider;
+
+      const ytext = ydoc.getText('monaco');
+      const binding = new MonacoBinding(
+        ytext,
+        editor.getModel(),
+        new Set([editor]),
+        provider.awareness
+      );
+      bindingRef.current = binding;
+
+      // 初期コンテンツの設定
+      const response = await fetch(`/api/files/${roomName}`);
+      if (response.ok) {
+        const content = await response.text();
+        ytext.delete(0, ytext.length);
+        ytext.insert(0, content);
+        handleEditorChange(content);
+      }
+    } catch (err) {
+      console.error('Setup failed:', err);
+    }
+  };
+
+  useEffect(() => {
+    return () => {
+      if (bindingRef.current) bindingRef.current.destroy();
+      if (wsProviderRef.current) wsProviderRef.current.destroy();
+    };
   }, []);
 
   return (
     <div className="editor-container">
-      <div className="editor-pane">
-        <Editor
-          height="100%"
-          defaultLanguage="markdown"
-          value={content}
-          theme="vs-dark"
-          onMount={handleEditorDidMount}
-          onChange={handleEditorChange} // 変更ハンドラーを追加
-          options={{
-            minimap: { enabled: false },
-            wordWrap: 'on',
-            fontSize: 16,
-            lineNumbers: 'on',
-            automaticLayout: true
-          }}
-        />
-      </div>
-      <div className="preview-pane">
-        {preview && (
-          <div
-            className="marp-preview"
-            dangerouslySetInnerHTML={{ __html: preview }}
+      <div className="workspace">
+        <div className="editor-pane">
+          <Editor
+            height="100%"
+            defaultLanguage="markdown"
+            defaultValue=""
+            theme="vs-dark"
+            onMount={handleEditorDidMount}
+            onChange={handleEditorChange}
+            options={{
+              minimap: { enabled: false },
+              wordWrap: 'on',
+              fontSize: 16,
+              lineNumbers: 'on',
+              automaticLayout: true
+            }}
           />
-        )}
+        </div>
+        <div className="preview-pane">
+          <div 
+            className="marp-preview"
+            dangerouslySetInnerHTML={{ __html: preview }} 
+          />
+        </div>
       </div>
     </div>
   );

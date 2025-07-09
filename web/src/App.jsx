@@ -7,18 +7,13 @@ function App() {
   const [currentFile, setCurrentFile] = useState(null);
   const [error, setError] = useState(null);
 
-  useEffect(() => {
-    fetchFiles();
-  }, []);
-
+  // ファイル一覧の取得
   const fetchFiles = async () => {
     try {
-      const response = await fetch('http://localhost:8080/api/files');
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
+      const response = await fetch('/api/files');
+      if (!response.ok) throw new Error('Failed to fetch files');
       const data = await response.json();
-      setFiles(data || []); // 空配列をデフォルト値として設定
+      setFiles(data || []);
       if (data && data.length > 0 && !currentFile) {
         setCurrentFile(data[0].name);
       }
@@ -28,22 +23,28 @@ function App() {
     }
   };
 
+  useEffect(() => {
+    fetchFiles();
+  }, []);
+
   const handleNewFile = async () => {
     const fileName = prompt('ファイル名を入力してください（.mdは自動で付加されます）:');
     if (!fileName) return;
 
     try {
-      const response = await fetch('http://localhost:8080/api/files', {
+      const response = await fetch('/api/files', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: `${fileName}.md` })
       });
 
       if (response.ok) {
-        fetchFiles();
+        await fetchFiles();
+        setCurrentFile(`${fileName}.md`);
       }
     } catch (err) {
       console.error('Failed to create file:', err);
+      setError('ファイルの作成に失敗しました');
     }
   };
 
@@ -61,7 +62,7 @@ function App() {
             className="file-select"
           >
             <option value="">ファイルを選択...</option>
-            {files && files.map(file => (
+            {files.map(file => (
               <option key={file.name} value={file.name}>
                 {file.name}
               </option>

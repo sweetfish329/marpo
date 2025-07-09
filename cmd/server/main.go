@@ -3,6 +3,8 @@ package main
 import (
 	"encoding/json"
 	"flag"
+	"fmt"
+	"html/template"
 	"log"
 	"marpo/internal/websocket"
 	"net/http"
@@ -88,6 +90,33 @@ func main() {
 	r.HandleFunc("/api/files", handleGetFiles).Methods("GET")
 	r.HandleFunc("/api/files", handleCreateFile).Methods("POST")
 	r.HandleFunc("/api/files/{filename}", handleGetFile).Methods("GET")
+	r.HandleFunc("/api/server-info", getServerAddress).Methods("GET")
+
+	// config.jsを生成するハンドラー
+	r.HandleFunc("/config.js", func(w http.ResponseWriter, r *http.Request) {
+		host := r.Host
+		if strings.Contains(host, ":") {
+			host = strings.Split(host, ":")[0]
+		}
+
+		w.Header().Set("Content-Type", "application/javascript")
+		tmpl := template.Must(template.New("config").Parse(`
+            export const config = {
+                wsUrl: "ws://{{.Host}}:{{.Port}}/ws",
+                httpUrl: "http://{{.Host}}:{{.Port}}/api"
+            };
+        `))
+
+		data := struct {
+			Host string
+			Port string
+		}{
+			Host: host,
+			Port: strings.TrimPrefix(*addr, ":"),
+		}
+
+		tmpl.Execute(w, data)
+	})
 
 	// 静的ファイルの提供
 	staticDir := "./web/build"
@@ -112,7 +141,7 @@ func main() {
 
 	// CORSの設定
 	corsMiddleware := handlers.CORS(
-		handlers.AllowedOrigins([]string{"*"}),
+		handlers.AllowedOrigins([]string{"http://localhost:5173", "http://localhost:8080"}),
 		handlers.AllowedMethods([]string{"GET", "POST", "OPTIONS"}),
 		handlers.AllowedHeaders([]string{"Content-Type", "X-Requested-With"}),
 	)
@@ -226,6 +255,25 @@ func handleGetFile(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "text/markdown")
 	w.Write(content)
+}
+
+// サーバーアドレスを取得するハンドラー
+func getServerAddress(w http.ResponseWriter, r *http.Request) {
+	// ホストアドレスを取得
+	host := r.Host
+	if strings.Contains(host, ":") {
+		// ポート番号がある場合は除去
+		host = strings.Split(host, ":")[0]
+	}
+
+	// JSONレスポンスを作成
+	response := map[string]string{
+		"wsUrl":   fmt.Sprintf("ws://%s:%s/ws", host, strings.TrimPrefix(*addr, ":")),
+		"httpUrl": fmt.Sprintf("http://%s:%s", host, strings.TrimPrefix(*addr, ":")),
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
 }
 
 // ファイル名のバリデーション用ヘルパー関数
