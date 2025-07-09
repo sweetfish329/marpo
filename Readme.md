@@ -20,6 +20,7 @@ React, Monaco Editor, Yjs, そして Go (Golang) を使用して構築する、M
 - 🔄 ユーザーカーソル位置の同期
 - 🔄 コメント・注釈機能
 - 🔄 ユーザー認証
+- 🔄 Chakra UI
 
 ## 技術スタック (Tech Stack)
 

@@ -107,3 +107,18 @@
   color: #ff6b6b;
   margin-left: 16px;
 }
+
+/* 他ユーザーのカーソル用のベーススタイル */
+.remote-cursor {
+  border-left: 4px solid #ff00ff;
+  border-radius: 2px;
+  margin-left: -2px;
+  pointer-events: none;
+  z-index: 10;
+}
+/* 色はJS側で動的に上書きされます */
+
+/* 選択範囲のハイライトも強調 */
+[class*="remote-cursor-color-"] {
+  background: rgba(0,0,0,0.07);
+}

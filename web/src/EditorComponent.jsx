@@ -14,6 +14,7 @@ const EditorComponent = ({ roomName }) => {
   const marpRef = useRef(new Marp());
   const wsProviderRef = useRef(null);
   const bindingRef = useRef(null);
+  const otherCursors = useRef([]);
 
   // 内容の保存を行う関数を追加
   const saveContent = async (content) => {
@@ -51,6 +52,13 @@ const EditorComponent = ({ roomName }) => {
     [debouncedSave]
   );
 
+  // ユーザーごとに一意な色を決定する関数
+  const getColorForClient = (clientID) => {
+    // HSLで色相をclientIDで分散させる
+    const hue = (clientID * 47) % 360;
+    return `hsl(${hue}, 80%, 60%)`;
+  };
+
   const handleEditorDidMount = async (editor) => {
     editorRef.current = editor;
 
@@ -69,6 +77,119 @@ const EditorComponent = ({ roomName }) => {
       if (model) {
         model.setEOL && model.setEOL(1); // 1 = LF
       }
+
+      // awarenessでカーソル同期
+      const awareness = provider.awareness;
+      const clientID = awareness.clientID;
+      // 自分の色を一意に決定しawarenessにセット
+      if (!awareness.getLocalState()?.color) {
+        awareness.setLocalStateField('color', getColorForClient(clientID));
+      }
+
+      // カーソル位置デコレーション用（awarenessをローカルで参照）
+      const updateOtherCursors = () => {
+        const model = editor.getModel();
+        const states = Array.from(awareness.getStates().entries());
+        const decorations = [];
+        states.forEach(([id, state]) => {
+          if (id === clientID) return; // 自分は除外
+          if (state.cursor && state.color) {
+            const className = `remote-cursor-color-${id}`;
+            if (!document.getElementById(className)) {
+              const style = document.createElement('style');
+              style.id = className;
+              style.innerHTML = `
+                .${className} {
+                  border-left: 4px solid ${state.color} !important;
+                  border-radius: 2px;
+                  margin-left: -2px;
+                  pointer-events: none;
+                  z-index: 10;
+                }
+                .${className}::after {
+                  content: '';
+                  display: block;
+                  position: absolute;
+                  left: -2px;
+                  top: 0;
+                  width: 4px;
+                  height: 100%;
+                  background: ${state.color};
+                  opacity: 0.7;
+                }
+              `;
+              document.head.appendChild(style);
+            }
+            let range;
+            if (
+              state.cursor.startLineNumber === state.cursor.endLineNumber &&
+              state.cursor.startColumn === state.cursor.endColumn
+            ) {
+              // 行の最大カラムを取得
+              const line = state.cursor.startLineNumber;
+              const maxCol = model.getLineMaxColumn(line);
+              let startCol = state.cursor.startColumn;
+              // カーソルが行末や空行の場合はmaxColに合わせる
+              if (startCol > maxCol) startCol = maxCol;
+              if (startCol === maxCol || maxCol === 1) {
+                range = new window.monaco.Range(line, maxCol, line, maxCol);
+              } else {
+                range = new window.monaco.Range(line, startCol, line, startCol + 1);
+              }
+            } else {
+              range = new window.monaco.Range(
+                state.cursor.startLineNumber,
+                state.cursor.startColumn,
+                state.cursor.endLineNumber,
+                state.cursor.endColumn
+              );
+            }
+            decorations.push({
+              range,
+              options: {
+                inlineClassName: className,
+                stickiness: 1
+              }
+            });
+          }
+        });
+        otherCursors.current = editor.deltaDecorations(otherCursors.current, decorations);
+      };
+
+      // 自分のカーソル位置をawarenessにセット
+      let lastCursor = null;
+      editor.onDidChangeCursorSelection((e) => {
+        const selection = e.selection;
+        const cursor = {
+          startLineNumber: selection.startLineNumber,
+          startColumn: selection.startColumn,
+          endLineNumber: selection.endLineNumber,
+          endColumn: selection.endColumn
+        };
+        if (
+          lastCursor &&
+          lastCursor.startLineNumber === cursor.startLineNumber &&
+          lastCursor.startColumn === cursor.startColumn &&
+          lastCursor.endLineNumber === cursor.endLineNumber &&
+          lastCursor.endColumn === cursor.endColumn
+        ) {
+          return;
+        }
+        lastCursor = cursor;
+        awareness.setLocalStateField('cursor', cursor);
+      });
+
+      // 他ユーザーのカーソル位置をデコレーション
+      let cursorUpdatePending = false;
+      awareness.on('change', ({ added, updated, removed }) => {
+        if (!cursorUpdatePending) {
+          cursorUpdatePending = true;
+          requestAnimationFrame(() => {
+            updateOtherCursors();
+            cursorUpdatePending = false;
+          });
+        }
+      });
 
       // 接続状態の監視
       provider.on('status', ({ status }) => {
