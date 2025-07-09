@@ -3,6 +3,8 @@ package websocket
 import (
 	"log"
 	"net/http"
+	"time"
+	"unicode/utf8"
 
 	"github.com/gorilla/websocket"
 )
@@ -43,6 +45,9 @@ func (c *Client) ReadPump() {
 		c.conn.Close()
 	}()
 
+	c.conn.SetReadLimit(512 * 1024)     // 512KB
+	c.conn.SetReadDeadline(time.Time{}) // デッドラインを無効化
+
 	for {
 		_, message, err := c.conn.ReadMessage()
 		if err != nil {
@@ -51,6 +56,13 @@ func (c *Client) ReadPump() {
 			}
 			break
 		}
+
+		// UTF-8の検証を追加
+		if !utf8.Valid(message) {
+			log.Printf("invalid UTF-8 message received")
+			continue
+		}
+
 		c.room.Broadcast(message)
 	}
 }
@@ -60,8 +72,9 @@ func (c *Client) WritePump() {
 	defer c.conn.Close()
 
 	for message := range c.send {
-		err := c.conn.WriteMessage(websocket.TextMessage, message)
-		if err != nil {
+		c.conn.SetWriteDeadline(time.Time{}) // デッドラインを無効化
+
+		if err := c.conn.WriteMessage(websocket.TextMessage, message); err != nil {
 			log.Printf("error writing message: %v", err)
 			return
 		}

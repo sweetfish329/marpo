@@ -11,6 +11,7 @@
   "dependencies": {
     "@marp-team/marp-core": "^4.1.0",
     "@monaco-editor/react": "^4.7.0",
+    "lodash.debounce": "^4.0.8",
     "monaco-editor": "^0.45.0",
     "monaco-markdown": "^0.0.12",
     "react": "^18.3.1",

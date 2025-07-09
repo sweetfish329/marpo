@@ -3,8 +3,12 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Marpo - Marp Collaborative Editor</title>
-    <script defer src="/config.js"></script>
+    <title>Marpo</title>
+    <!-- config.jsをモジュールとして読み込み -->
+    <script type="module">
+      import { config } from '/config.js';
+      window.serverConfig = config;
+    </script>
   </head>
   <body>
     <div id="root"></div>

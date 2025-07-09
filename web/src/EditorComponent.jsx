@@ -1,9 +1,10 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import Editor from '@monaco-editor/react';
 import * as Y from 'yjs';
 import { WebsocketProvider } from 'y-websocket';
 import { MonacoBinding } from 'y-monaco';
 import { Marp } from '@marp-team/marp-core';
+import debounce from 'lodash.debounce';
 import './EditorComponent.css';
 
 const EditorComponent = ({ roomName }) => {
@@ -13,15 +14,41 @@ const EditorComponent = ({ roomName }) => {
   const wsProviderRef = useRef(null);
   const bindingRef = useRef(null);
 
-  const handleEditorChange = (value) => {
-    if (!value) return;
+  // 内容の保存を行う関数を追加
+  const saveContent = async (content) => {
     try {
-      const { html } = marpRef.current.render(value);
-      setPreview(html);
+      await fetch(`/api/files/${roomName}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ content }),
+      });
     } catch (err) {
-      console.error('Preview rendering failed:', err);
+      console.error('Failed to save file:', err);
     }
   };
+
+  // デバウンス処理を追加
+  const debouncedSave = useCallback(
+    debounce((content) => saveContent(content), 1000),
+    []
+  );
+
+  // エディタの変更ハンドラを定義（一つに統合）
+  const handleEditorChange = useCallback(
+    (value) => {
+      if (!value) return;
+      try {
+        const { html } = marpRef.current.render(value);
+        setPreview(html);
+        debouncedSave(value);
+      } catch (err) {
+        console.error('Preview rendering failed:', err);
+      }
+    },
+    [debouncedSave]
+  );
 
   const handleEditorDidMount = async (editor) => {
     editorRef.current = editor;
@@ -30,10 +57,39 @@ const EditorComponent = ({ roomName }) => {
       const ydoc = new Y.Doc();
       const provider = new WebsocketProvider(
         'ws://localhost:8080/ws',
-        roomName,
-        ydoc
+        encodeURIComponent(roomName), // ファイル名をエンコード
+        ydoc,
+        { connect: true }
       );
       wsProviderRef.current = provider;
+
+      // 接続状態の監視
+      provider.on('status', ({ status }) => {
+        console.log('WebSocket status:', status);
+        if (status === 'connected') {
+          // 初期コンテンツの読み込み
+          provider.once('synced', async () => {
+            try {
+              const response = await fetch(`/api/files/${roomName}`);
+              if (response.ok) {
+                const content = await response.text();
+                const ytext = ydoc.getText('monaco');
+                if (ytext.toString() === '') {
+                  ytext.insert(0, content);
+                }
+                handleEditorChange(ytext.toString());
+              }
+            } catch (err) {
+              console.error('Failed to load initial content:', err);
+            }
+          });
+        }
+      });
+
+      // エラーハンドリング
+      provider.on('connection-error', (err) => {
+        console.error('WebSocket connection error:', err);
+      });
 
       const ytext = ydoc.getText('monaco');
       const binding = new MonacoBinding(
@@ -43,15 +99,6 @@ const EditorComponent = ({ roomName }) => {
         provider.awareness
       );
       bindingRef.current = binding;
-
-      // 初期コンテンツの設定
-      const response = await fetch(`/api/files/${roomName}`);
-      if (response.ok) {
-        const content = await response.text();
-        ytext.delete(0, ytext.length);
-        ytext.insert(0, content);
-        handleEditorChange(content);
-      }
     } catch (err) {
       console.error('Setup failed:', err);
     }
@@ -85,9 +132,9 @@ const EditorComponent = ({ roomName }) => {
           />
         </div>
         <div className="preview-pane">
-          <div 
+          <div
             className="marp-preview"
-            dangerouslySetInnerHTML={{ __html: preview }} 
+            dangerouslySetInnerHTML={{ __html: preview }}
           />
         </div>
       </div>

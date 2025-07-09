@@ -3,17 +3,17 @@ package main
 import (
 	"encoding/json"
 	"flag"
-	"fmt"
 	"html/template"
 	"log"
-	"marpo/internal/websocket"
+	"marpo/internal/filehandlers" // パッケージ名を変更
+	wsinternal "marpo/internal/websocket"
 	"net/http"
 	"os"
 	"path"
 	"path/filepath"
 	"strings"
 
-	"github.com/gorilla/handlers"
+	ghandlers "github.com/gorilla/handlers" // エイリアスを付与
 	"github.com/gorilla/mux"
 )
 
@@ -28,42 +28,25 @@ func spaFileServer(root string) http.HandlerFunc {
 
 	fs := http.FileServer(http.Dir(absRoot))
 	return func(w http.ResponseWriter, r *http.Request) {
-		// APIエンドポイントとWebSocketは無視
 		if strings.HasPrefix(r.URL.Path, "/ws/") || strings.HasPrefix(r.URL.Path, "/api/") {
 			return
 		}
 
-		// パスの正規化
 		path := filepath.Join(absRoot, r.URL.Path)
 		path = filepath.Clean(path)
 
-		// rootディレクトリ外へのアクセスを防ぐ
 		if !strings.HasPrefix(path, absRoot) {
-			log.Printf("Attempted directory traversal: %s", path)
 			http.Error(w, "Invalid path", http.StatusBadRequest)
 			return
 		}
 
-		// ファイルの存在確認
-		info, err := os.Stat(path)
-		if err != nil {
-			// index.htmlを返す
-			indexPath := filepath.Join(absRoot, "index.html")
-			if _, err := os.Stat(indexPath); os.IsNotExist(err) {
-				http.Error(w, "File not found", http.StatusNotFound)
-				return
-			}
+		indexPath := filepath.Join(absRoot, "index.html")
+		if _, err := os.Stat(path); os.IsNotExist(err) {
 			http.ServeFile(w, r, indexPath)
 			return
 		}
 
-		// ディレクトリの場合はindex.htmlを確認
-		if info.IsDir() {
-			indexPath := filepath.Join(path, "index.html")
-			if _, err := os.Stat(indexPath); os.IsNotExist(err) {
-				http.Error(w, "Directory index not found", http.StatusNotFound)
-				return
-			}
+		if info, err := os.Stat(path); err == nil && info.IsDir() {
 			path = indexPath
 		}
 
@@ -75,50 +58,31 @@ func main() {
 	flag.Parse()
 
 	// WebSocketハブの初期化と起動
-	hub := websocket.NewHub()
+	hub := wsinternal.NewHub()
 	go hub.Run()
 
-	// ルーターの設定
+	// ハンドラー設定の初期化
+	config := &filehandlers.Config{
+		Addr: addr,
+	}
+
 	r := mux.NewRouter()
 
 	// WebSocketエンドポイント
 	r.HandleFunc("/ws/{roomId}", func(w http.ResponseWriter, r *http.Request) {
-		websocket.ServeWs(hub, w, r)
+		wsinternal.ServeWs(hub, w, r)
 	})
 
 	// APIエンドポイント
-	r.HandleFunc("/api/files", handleGetFiles).Methods("GET")
-	r.HandleFunc("/api/files", handleCreateFile).Methods("POST")
-	r.HandleFunc("/api/files/{filename}", handleGetFile).Methods("GET")
-	r.HandleFunc("/api/server-info", getServerAddress).Methods("GET")
+	r.HandleFunc("/api/files", config.HandleGetFiles).Methods("GET")
+	r.HandleFunc("/api/files", config.HandleCreateFile).Methods("POST")
+	r.HandleFunc("/api/files/{filename}", config.HandleGetFile).Methods("GET")
+	r.HandleFunc("/api/files/{filename}", config.HandleSaveFile).Methods("PUT")
 
 	// config.jsを生成するハンドラー
-	r.HandleFunc("/config.js", func(w http.ResponseWriter, r *http.Request) {
-		host := r.Host
-		if strings.Contains(host, ":") {
-			host = strings.Split(host, ":")[0]
-		}
+	r.HandleFunc("/config.js", config.HandleConfig)
 
-		w.Header().Set("Content-Type", "application/javascript")
-		tmpl := template.Must(template.New("config").Parse(`
-            export const config = {
-                wsUrl: "ws://{{.Host}}:{{.Port}}/ws",
-                httpUrl: "http://{{.Host}}:{{.Port}}/api"
-            };
-        `))
-
-		data := struct {
-			Host string
-			Port string
-		}{
-			Host: host,
-			Port: strings.TrimPrefix(*addr, ":"),
-		}
-
-		tmpl.Execute(w, data)
-	})
-
-	// 静的ファイルの提供
+	// 静的ファイルの設定
 	staticDir := "./web/build"
 	absStaticDir, err := filepath.Abs(staticDir)
 	if err != nil {
@@ -127,7 +91,6 @@ func main() {
 
 	if _, err := os.Stat(absStaticDir); os.IsNotExist(err) {
 		log.Printf("Warning: Static directory %s does not exist\n", absStaticDir)
-		// 開発環境用のディレクトリを試す
 		staticDir = "./web/public"
 		absStaticDir, err = filepath.Abs(staticDir)
 		if err != nil {
@@ -135,24 +98,24 @@ func main() {
 		}
 	}
 
-	// 静的ファイルのルーティング
+	// CORSの設定
+	corsMiddleware := ghandlers.CORS( // エイリアスを使用
+		ghandlers.AllowedOrigins([]string{"http://localhost:5173", "http://localhost:8080"}),
+		ghandlers.AllowedMethods([]string{"GET", "POST", "PUT", "OPTIONS"}),
+		ghandlers.AllowedHeaders([]string{"Content-Type", "X-Requested-With"}),
+	)
+
+	// 静的ファイルの提供
 	r.PathPrefix("/static/").Handler(http.StripPrefix("/static/", http.FileServer(http.Dir(absStaticDir))))
 	r.PathPrefix("/").Handler(spaFileServer(absStaticDir))
 
-	// CORSの設定
-	corsMiddleware := handlers.CORS(
-		handlers.AllowedOrigins([]string{"http://localhost:5173", "http://localhost:8080"}),
-		handlers.AllowedMethods([]string{"GET", "POST", "OPTIONS"}),
-		handlers.AllowedHeaders([]string{"Content-Type", "X-Requested-With"}),
-	)
-
-	// HTTPサーバーの起動
+	// サーバーの起動
 	server := &http.Server{
 		Addr:    *addr,
 		Handler: corsMiddleware(r),
 	}
 
-	log.Printf("Starting server on %s serving static files from %s\n", *addr, staticDir)
+	log.Printf("Starting server on %s\n", *addr)
 	if err := server.ListenAndServe(); err != nil {
 		log.Fatal("ListenAndServe:", err)
 	}
@@ -257,23 +220,54 @@ func handleGetFile(w http.ResponseWriter, r *http.Request) {
 	w.Write(content)
 }
 
-// サーバーアドレスを取得するハンドラー
-func getServerAddress(w http.ResponseWriter, r *http.Request) {
-	// ホストアドレスを取得
+// ファイルを保存するハンドラー
+func handleSaveFile(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	filename := vars["filename"]
+
+	// ファイル内容を取得
+	var content struct {
+		Content string `json:"content"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&content); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// ファイルパスの作成と保存
+	filepath := path.Join("./storage", filename)
+	if err := os.WriteFile(filepath, []byte(content.Content), 0644); err != nil {
+		http.Error(w, "Failed to save file", http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+}
+
+// config.jsを生成するハンドラー
+func handleConfig(w http.ResponseWriter, r *http.Request) {
 	host := r.Host
 	if strings.Contains(host, ":") {
-		// ポート番号がある場合は除去
 		host = strings.Split(host, ":")[0]
 	}
 
-	// JSONレスポンスを作成
-	response := map[string]string{
-		"wsUrl":   fmt.Sprintf("ws://%s:%s/ws", host, strings.TrimPrefix(*addr, ":")),
-		"httpUrl": fmt.Sprintf("http://%s:%s", host, strings.TrimPrefix(*addr, ":")),
+	w.Header().Set("Content-Type", "application/javascript")
+	tmpl := template.Must(template.New("config").Parse(`
+        export const config = {
+            wsUrl: "ws://{{.Host}}:{{.Port}}/ws",
+            httpUrl: "http://{{.Host}}:{{.Port}}/api"
+        };
+    `))
+
+	data := struct {
+		Host string
+		Port string
+	}{
+		Host: host,
+		Port: strings.TrimPrefix(*addr, ":"),
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
+	tmpl.Execute(w, data)
 }
 
 // ファイル名のバリデーション用ヘルパー関数
