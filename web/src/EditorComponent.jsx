@@ -8,6 +8,7 @@ import debounce from 'lodash.debounce';
 import './EditorComponent.css';
 import { config } from '/config.js';
 
+
 const EditorComponent = ({ roomName }) => {
   const editorRef = useRef(null);
   const [preview, setPreview] = useState('');
@@ -63,6 +64,16 @@ const EditorComponent = ({ roomName }) => {
 
   const handleEditorDidMount = async (editor) => {
     editorRef.current = editor;
+
+    const themes = import.meta.glob('/marp-theme/*.css', { as: 'raw' });
+    for (const path in themes) {
+      try {
+        const css = await themes[path]();
+        marpRef.current.themeSet.add(css);
+      } catch (e) {
+        console.error(`Failed to load theme ${path}:`, e);
+      }
+    }
 
     try {
       const ydoc = new Y.Doc();
