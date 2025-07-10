@@ -40,11 +40,13 @@ const EditorComponent = ({ roomName }) => {
   // エディタの変更ハンドラを定義（一つに統合）
   const handleEditorChange = useCallback(
     (value) => {
-      if (!value) return;
+      // valueがundefinedの場合も考慮し、空文字列として扱う
+      const content = value || '';
       try {
-        const { html } = marpRef.current.render(value);
-        setPreview(html);
-        debouncedSave(value);
+        const { html, css } = marpRef.current.render(content);
+        // CSSを<style>タグで囲み、HTMLと結合してプレビューにセット
+        setPreview(`<style>${css}</style>${html}`);
+        debouncedSave(content);
       } catch (err) {
         console.error('Preview rendering failed:', err);
       }

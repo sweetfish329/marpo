@@ -6,7 +6,10 @@ import (
 	"net/http"
 	"os"
 	"path"
+	"path/filepath"
 	"strings"
+
+	"github.com/gorilla/mux"
 )
 
 // Configはサーバーの設定を保持します
@@ -86,23 +89,36 @@ func (c *Config) HandleCreateFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	filepath := path.Join("./storage", req.Name)
+	// セキュリティのため、filepath.Joinを使用します
+	filepath := filepath.Join("./storage", req.Name)
 	if _, err := os.Stat(filepath); err == nil {
 		http.Error(w, "File already exists", http.StatusConflict)
 		return
 	}
 
-	if err := os.WriteFile(filepath, []byte(""), 0644); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+	// 新規作成時に初期コンテンツを書き込みます
+	initialContent := "# " + strings.TrimSuffix(req.Name, ".md") + "\n\n"
+	if err := os.WriteFile(filepath, []byte(initialContent), 0644); err != nil {
+		http.Error(w, "Failed to write initial content", http.StatusInternalServerError)
 		return
 	}
 
+	// 作成したリソースの情報を返します
+	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(map[string]string{"name": req.Name})
 }
 
 // HandleGetFile ファイルを取得するハンドラー
 func (c *Config) HandleGetFile(w http.ResponseWriter, r *http.Request) {
-	filename := path.Base(r.URL.Path)
+	// gorilla/muxのURLパラメータからファイル名を取得します
+	vars := mux.Vars(r)
+	filename, ok := vars["filename"]
+	if !ok {
+		http.Error(w, "Filename not provided in URL", http.StatusBadRequest)
+		return
+	}
+
 	if !isValidFilename(filename) {
 		http.Error(w, "Invalid filename", http.StatusBadRequest)
 		return
@@ -125,7 +141,14 @@ func (c *Config) HandleGetFile(w http.ResponseWriter, r *http.Request) {
 
 // HandleSaveFile ファイルを保存するハンドラー
 func (c *Config) HandleSaveFile(w http.ResponseWriter, r *http.Request) {
-	filename := path.Base(r.URL.Path)
+	// gorilla/muxのURLパラメータからファイル名を取得します
+	vars := mux.Vars(r)
+	filename, ok := vars["filename"]
+	if !ok {
+		http.Error(w, "Filename not provided in URL", http.StatusBadRequest)
+		return
+	}
+
 	if !isValidFilename(filename) {
 		http.Error(w, "Invalid filename", http.StatusBadRequest)
 		return
@@ -144,6 +167,8 @@ func (c *Config) HandleSaveFile(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+
+	w.WriteHeader(http.StatusOK)
 }
 
 // isValidFilename ファイル名のバリデーション用ヘルパー関数
