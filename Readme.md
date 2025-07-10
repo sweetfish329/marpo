@@ -1,4 +1,4 @@
-# Marpo - Marp Online Collaborative Editor
+# MRRCO - MARp  Collaborative Online Editor
 
 React, Monaco Editor, Yjs, そして Go (Golang) を使用して構築する、Marp のためのオンライン共同編集アプリケーションです。
 

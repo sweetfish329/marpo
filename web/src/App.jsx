@@ -51,7 +51,7 @@ function App() {
   return (
     <div className="app">
       <div className="app-header">
-        <h1>Marpo</h1>
+        <h1>まる子　~MARp  Collaborative Online editor~</h1>
         <div className="file-controls">
           <button onClick={handleNewFile} className="new-file-btn">
             新規作成
