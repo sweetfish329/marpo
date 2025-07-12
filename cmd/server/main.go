@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"html/template"
@@ -19,6 +21,7 @@ import (
 )
 
 var addr = flag.String("addr", ":8080", "http service address")
+var instanceID string
 
 // 自身のIPv4アドレスを取得
 func getLocalIPv4() string {
@@ -72,23 +75,33 @@ func spaFileServer(root string) http.HandlerFunc {
 func main() {
 	flag.Parse()
 
+	// インスタンスIDの生成
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		log.Fatal(err)
+	}
+	instanceID = hex.EncodeToString(b)
+	log.Printf("Instance ID: %s", instanceID)
+
 	// WebSocketハブの初期化と起動
 	hub := wsinternal.NewHub()
 	go hub.Run()
 
 	// ハンドラー設定の初期化
 	config := &filehandlers.Config{
-		Addr: addr,
+		Addr:       addr,
+		InstanceID: instanceID,
 	}
 
 	r := mux.NewRouter()
 
 	// WebSocketエンドポイント
 	r.HandleFunc("/ws/{roomId}", func(w http.ResponseWriter, r *http.Request) {
-		wsinternal.ServeWs(hub, w, r)
+		wsinternal.ServeWs(hub, w, r, instanceID)
 	})
 
 	// APIエンドポイント
+	r.HandleFunc("/api/info", config.HandleGetInfo).Methods("GET")
 	r.HandleFunc("/api/files", config.HandleGetFiles).Methods("GET")
 	r.HandleFunc("/api/files", config.HandleCreateFile).Methods("POST")
 	r.HandleFunc("/api/files/{filename}", config.HandleGetFile).Methods("GET")

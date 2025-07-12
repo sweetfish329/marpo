@@ -14,7 +14,16 @@ import (
 
 // Configはサーバーの設定を保持します
 type Config struct {
-	Addr *string
+	Addr       *string
+	InstanceID string
+}
+
+// HandleGetInfo はサーバー情報を返すハンドラー
+func (c *Config) HandleGetInfo(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{
+		"instanceId": c.InstanceID,
+	})
 }
 
 // ハンドラー関数をメソッドとして定義

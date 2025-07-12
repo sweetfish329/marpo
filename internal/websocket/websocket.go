@@ -7,11 +7,18 @@ import (
 )
 
 // ServeWs はWebSocket接続をハンドルします
-func ServeWs(hub *Hub, w http.ResponseWriter, r *http.Request) {
+func ServeWs(hub *Hub, w http.ResponseWriter, r *http.Request, instanceID string) {
 	// URLからルーム名を取得
 	roomName := strings.TrimPrefix(r.URL.Path, "/ws/")
 	if roomName == "" {
 		http.Error(w, "Room name is required", http.StatusBadRequest)
+		return
+	}
+
+	// クエリパラメータからインスタンスIDを取得
+	queryInstanceID := r.URL.Query().Get("instanceId")
+	if queryInstanceID != instanceID {
+		http.Error(w, "Instance ID mismatch", http.StatusUnauthorized)
 		return
 	}
 
